@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>パブクイズ早押しブザー＆スコアカードアプリ</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen p-4">
+<div class="max-w-4xl mx-auto">
+  <h1 class="text-2xl font-bold text-center mb-2 text-amber-300">パブクイズ早押しブザー＆スコアカードアプリ</h1>
+  <div id="setupView">
+    <div class="bg-gray-900 rounded-xl p-5 mb-4">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="font-semibold">チーム設定（1〜8チーム）</h2>
+        <div class="flex gap-2">
+          <button id="addTeamBtn" aria-label="チーム追加" class="bg-amber-600 hover:bg-amber-500 rounded px-3 py-1 text-sm">+追加</button>
+        </div>
+      </div>
+      <div id="teamInputs" class="space-y-2"></div>
+    </div>
+    <button id="startGameBtn" aria-label="ゲーム開始" class="w-full bg-amber-600 hover:bg-amber-500 rounded-xl p-3 font-bold text-lg transition">ゲームを開始</button>
+  </div>
+  <div id="gameView" class="hidden">
+    <div class="bg-gray-900 rounded-xl p-4 mb-4 flex justify-between items-center flex-wrap gap-2">
+      <span class="font-semibold">ラウンド <span id="roundNum" class="text-amber-400">1</span></span>
+      <div class="flex gap-2">
+        <button id="resetBuzzerBtn" aria-label="ブザーリセット" class="bg-gray-700 hover:bg-gray-600 rounded px-3 py-1 text-sm">ブザーリセット</button>
+        <button id="nextRoundBtn" aria-label="次のラウンド" class="bg-green-700 hover:bg-green-600 rounded px-3 py-1 text-sm">次のラウンド →</button>
+        <button id="endGameBtn" aria-label="ゲーム終了" class="bg-red-800 hover:bg-red-700 rounded px-3 py-1 text-sm">終了</button>
+      </div>
+    </div>
+    <div id="buzzerStatus" class="bg-gray-900 rounded-xl p-6 mb-4 text-center hidden">
+      <div class="text-5xl mb-2">🔔</div>
+      <div id="buzzerWinner" class="text-2xl font-bold text-amber-400"></div>
+      <div class="text-gray-400 text-sm mt-1">早押し！</div>
+    </div>
+    <div id="teamGrid" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4"></div>
+    <div class="bg-gray-900 rounded-xl p-4">
+      <h2 class="font-semibold text-sm text-gray-400 mb-2">ラウンドごとの得点入力</h2>
+      <div id="scoreInputs" class="space-y-2"></div>
+      <button id="confirmScoreBtn" aria-label="得点を確定" class="mt-3 w-full bg-green-700 hover:bg-green-600 rounded py-2 font-semibold transition">得点を確定</button>
+    </div>
+  </div>
+  <div id="rankView" class="hidden">
+    <div class="bg-gray-900 rounded-xl p-6">
+      <h2 class="text-xl font-bold text-center text-amber-300 mb-4">最終ランキング</h2>
+      <div id="rankList" class="space-y-3"></div>
+      <button id="newGameBtn" aria-label="新しいゲーム" class="mt-4 w-full bg-amber-600 hover:bg-amber-500 rounded py-2 font-semibold transition">新しいゲーム</button>
+    </div>
+  </div>
+</div>
+<script>
+const teamColors = ['bg-red-700','bg-blue-700','bg-green-700','bg-yellow-700','bg-purple-700','bg-pink-700','bg-cyan-700','bg-orange-700'];
+const keyMap = ['a','s','d','f','j','k','l',';'];
+let teams = [];
+let scores = [];
+let round = 1;
+let buzzerActive = false;
+let audioCtx = null;
+
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playBuzzer(freq = 880, duration = 0.3) {
+  const ctx = getAudioCtx();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.frequency.value = freq;
+  osc.type = 'square';
+  gain.gain.setValueAtTime(0.3, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+  osc.start();
+  osc.stop(ctx.currentTime + duration);
+}
+
+function initTeamInputs() {
+  const container = document.getElementById('teamInputs');
+  container.innerHTML = '';
+  teams.forEach((t, i) => {
+    const div = document.createElement('div');
+    div.className = 'flex gap-2 items-center';
+    div.innerHTML = `
+      <span class="w-6 h-6 ${teamColors[i]} rounded text-xs flex items-center justify-center font-bold">${i+1}</span>
+      <input type="text" value="${t}" data-idx="${i}" aria-label="チーム${i+1}名前" class="teamNameInput flex-1 bg-gray-800 border border-gray-700 rounded p-1 text-sm">
+      <span class="text-xs text-gray-500 w-6">[${keyMap[i]}]</span>
+      <button data-idx="${i}" aria-label="チーム${i+1}削除" class="removeTeamBtn text-red-500 hover:text-red-400 text-sm">×</button>
+    `;
+    container.appendChild(div);
+  });
+  document.querySelectorAll('.teamNameInput').forEach(inp => {
+    inp.addEventListener('input', e => { teams[+e.target.dataset.idx] = e.target.value; });
+  });
+  document.querySelectorAll('.removeTeamBtn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const idx = +e.target.dataset.idx;
+      teams.splice(idx, 1);
+      scores.splice(idx, 1);
+      initTeamInputs();
+    });
+  });
+}
+
+if (teams.length === 0) {
+  teams = ['チームA', 'チームB'];
+  scores = [0, 0];
+  initTeamInputs();
+}
+
+document.getElementById('addTeamBtn').addEventListener('click', () => {
+  if (teams.length >= 8) return;
+  teams.push(`チーム${String.fromCharCode(65 + teams.length)}`);
+  scores.push(0);
+  initTeamInputs();
+});
+
+document.getElementById('startGameBtn').addEventListener('click', () => {
+  teams = Array.from(document.querySelectorAll('.teamNameInput')).map(i => i.value || `チーム${+i.dataset.idx+1}`);
+  scores = new Array(teams.length).fill(0);
+  round = 1;
+  document.getElementById('setupView').classList.add('hidden');
+  document.getElementById('gameView').classList.remove('hidden');
+  renderGame();
+});
+
+function renderGame() {
+  document.getElementById('roundNum').textContent = round;
+  document.getElementById('buzzerStatus').classList.add('hidden');
+  buzzerActive = true;
+  const grid = document.getElementById('teamGrid');
+  grid.innerHTML = teams.map((t, i) => `
+    <div id="teamCard${i}" class="bg-gray-800 rounded-xl p-4 text-center border-2 border-transparent transition">
+      <div class="text-xs text-gray-400 mb-1">[${keyMap[i]}]</div>
+      <div class="${teamColors[i]} text-white text-sm font-bold rounded px-2 py-0.5 mb-2">${t}</div>
+      <div class="text-2xl font-bold text-white" id="scoreDisplay${i}">${scores[i]}</div>
+    </div>
+  `).join('');
+  const scoreInputs = document.getElementById('scoreInputs');
+  scoreInputs.innerHTML = teams.map((t, i) => `
+    <div class="flex items-center gap-2">
+      <span class="w-20 text-sm text-gray-300 truncate">${t}</span>
+      <input type="number" value="0" min="0" max="20" data-team="${i}" aria-label="${t}の点数" class="roundScoreInput w-16 bg-gray-800 border border-gray-700 rounded p-1 text-sm text-center">
+      <span class="text-xs text-gray-500">点</span>
+    </div>
+  `).join('');
+}
+
+document.addEventListener('keydown', e => {
+  if (!buzzerActive) return;
+  const idx = keyMap.indexOf(e.key.toLowerCase());
+  if (idx === -1 || idx >= teams.length) return;
+  buzzerActive = false;
+  playBuzzer(880, 0.5);
+  document.getElementById('buzzerStatus').classList.remove('hidden');
+  document.getElementById('buzzerWinner').textContent = teams[idx];
+  for (let i = 0; i < teams.length; i++) {
+    const card = document.getElementById(`teamCard${i}`);
+    if (card) card.className = card.className.replace('border-transparent', i === idx ? 'border-amber-400 shadow-lg shadow-amber-900' : 'border-transparent opacity-50');
+  }
+});
+
+document.getElementById('resetBuzzerBtn').addEventListener('click', () => {
+  buzzerActive = true;
+  document.getElementById('buzzerStatus').classList.add('hidden');
+  for (let i = 0; i < teams.length; i++) {
+    const card = document.getElementById(`teamCard${i}`);
+    if (card) {
+      card.className = card.className.replace('border-amber-400 shadow-lg shadow-amber-900', 'border-transparent');
+      card.className = card.className.replace('opacity-50', '');
+    }
+  }
+});
+
+document.getElementById('confirmScoreBtn').addEventListener('click', () => {
+  document.querySelectorAll('.roundScoreInput').forEach(inp => {
+    scores[+inp.dataset.team] += parseInt(inp.value) || 0;
+    document.getElementById(`scoreDisplay${inp.dataset.team}`).textContent = scores[+inp.dataset.team];
+  });
+});
+
+document.getElementById('nextRoundBtn').addEventListener('click', () => {
+  round++;
+  renderGame();
+});
+
+document.getElementById('endGameBtn').addEventListener('click', () => {
+  document.getElementById('gameView').classList.add('hidden');
+  document.getElementById('rankView').classList.remove('hidden');
+  const sorted = teams.map((t, i) => ({ name: t, score: scores[i], color: teamColors[i] }))
+    .sort((a, b) => b.score - a.score);
+  const medals = ['🥇', '🥈', '🥉'];
+  document.getElementById('rankList').innerHTML = sorted.map((t, i) => `
+    <div class="flex items-center gap-3 ${t.color} rounded-xl p-3">
+      <span class="text-2xl">${medals[i] || `${i+1}`}</span>
+      <span class="flex-1 font-semibold">${t.name}</span>
+      <span class="text-2xl font-bold">${t.score}</span>
+      <span class="text-sm text-white/70">点</span>
+    </div>
+  `).join('');
+  saveHistory(sorted);
+});
+
+function saveHistory(result) {
+  const h = JSON.parse(localStorage.getItem('pubQuizHistory') || '[]');
+  h.unshift({ date: new Date().toLocaleDateString('ja-JP'), rounds: round, result });
+  if (h.length > 10) h.pop();
+  localStorage.setItem('pubQuizHistory', JSON.stringify(h));
+}
+
+document.getElementById('newGameBtn').addEventListener('click', () => {
+  teams = ['チームA', 'チームB'];
+  scores = [0, 0];
+  round = 1;
+  document.getElementById('rankView').classList.add('hidden');
+  document.getElementById('setupView').classList.remove('hidden');
+  initTeamInputs();
+});
+</script>
+</body>
+</html>
